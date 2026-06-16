@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "config": {
+    "enable_friend_request": false,
+    "enable_group_request": false,
+    "auto_approve_group_join": false,
+    "whitelist": [],
+    "whitelist_group": [],
+    "blacklist": [],
+    "enable_admin_commands": false,
+    "poke_enabled": true,
+    "poke_back_replies": [],
+    "poke_noreply_replies": [],
+    "welcome_text": "欢迎加入本群，请遵守群规～",
+    "welcome_image_url": [],
+    "leave_text": "",
+    "leave_image_url": [],
+    "enable_auto_mute": false,
+    "mute_keywords": [],
+    "mute_ai_review": false,
+    "mute_ai_prompt": "判断以下群聊消息是否包含违规内容（广告、刷屏、恶意链接等）。仅回复yes或no：",
+    "mute_duration": 600,
+    "mute_recall": false,
+    "mute_whitelist": [],
+    "mute_reply": "",
+    "blacklist_mute_duration": 2592000,
+    "blacklist_mute_reply": ""
+  },
+  "per_group_config": {},
+  "groups": [],
+  "friends": []
+}
