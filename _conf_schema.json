@@ -1,0 +1,174 @@
+{
+    "enable_friend_request":{
+        "type": "bool",
+        "default": false,
+        "description": "自动通过好友申请",
+        "hint": "启用后，所有好友申请将自动通过"
+    },
+    "enable_group_request":{
+        "type": "bool",
+        "default": false,
+        "description": "自动接受群聊邀请（别人邀请机器人进群）",
+        "hint": "启用后，当有人邀请机器人加入群聊时将自动同意"
+    },
+    "auto_approve_group_join":{
+        "type": "bool",
+        "default": false,
+        "description": "自动通过加群申请（机器人作为群管理时）",
+        "hint": "启用后，机器人作为群管理员时，自动通过用户的加群申请"
+    },
+    "whitelist": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "用户白名单",
+        "hint": "指定用户QQ列表，仅在这些好友/私聊用户启用插件功能，否则忽略所有消息且不作回复及响应，示例: [123456789, 987654321]"
+    },
+    "whitelist_group": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "群聊白名单",
+        "hint": "指定QQ群列表，仅在这些群启用插件功能，否则忽略所有消息且不作回复及响应，示例: [123456789, 987654321]"
+    },
+    "blacklist": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "用户黑名单",
+        "hint": "黑名单用户发送消息时自动禁言，申请加群时自动拒绝，示例: [123456789]"
+    },
+    "enable_admin_commands": {
+        "type": "bool",
+        "default": false,
+        "description": "启用群内管理命令（拉黑、解黑、踢出）",
+        "hint": "启用后，群管理员可在群内发送「拉黑 QQ」「解黑 QQ」「踢出 QQ」等命令"
+    },
+    "poke_enabled": {
+        "type": "bool",
+        "default": true,
+        "description": "启用戳一戳互动",
+        "hint": "启用后，当有人在群内戳机器人时会自动回复，可自定义回复内容"
+    },
+    "poke_back_replies": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "戳一戳互动中戳回去时随机回复的内容列表",
+        "hint": "50%概率触发，随机选一条回复并戳回去，留空则不发送文字回复。示例：[\"反弹！\", \"看我戳回去\"]"
+    },
+    "poke_noreply_replies": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "戳一戳互动中不戳回去时随机回复的内容列表",
+        "hint": "50%概率触发，随机选一条回复但不戳回去，留空则不发送文字回复。示例：[\"干嘛戳我\", \"别戳了\"]"
+    },
+    "welcome_text": {
+        "type": "string",
+        "default": "欢迎加入本群，请遵守群规～",
+        "description": "进群欢迎内容，留空则不发送欢迎消息",
+        "hint": "默认自带@昵称，支持回车换行符\\n，示例：欢迎加入本群!\\n请遵守群规～"
+    },
+    "welcome_image_url": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "进群欢迎附带图片（可选），留空则不附带图片发送",
+        "hint": "支持发送基于插件目录下的多张图片或网络图片链接,本地文件不存在时不会发送，示例：[\"images/welcome.jpg\", \"https://example.com/welcome.png\"]"
+    },
+    "leave_text": {
+        "type": "string",
+        "default": "",
+        "description": "退群通知内容，留空则不发送退群通知",
+        "hint": "退群后无法获取昵称，仅支持 {user_id} 变量（输出QQ号），支持回车换行符\\n，留空则不发送"
+    },
+    "leave_image_url": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "退群通知附带图片（可选），留空则不附带图片发送",
+        "hint": "支持发送基于插件目录下的多张图片或网络图片链接,本地文件不存在时不会发送，示例：[\"images/leave.jpg\", \"https://example.com/leave.png\"]"
+    },
+    "enable_auto_mute": {
+        "type": "bool",
+        "default": false,
+        "description": "启用自动禁言",
+        "hint": "启用后将对触发规则的群成员自动禁言"
+    },
+    "mute_keywords": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "禁言触发关键词（正则表达式）",
+        "hint": "消息匹配到任一正则即触发禁言，禁言前会检查是否已在白名单中，示例：[\"广告\", \"\\\\d{11,}\"]"
+    },
+    "mute_ai_review": {
+        "type": "bool",
+        "default": false,
+        "description": "启用AI审核禁言",
+        "hint": "启用后通过AI判断消息是否违规，与关键词规则为「或」关系，即任一条件满足即禁言"
+    },
+    "mute_ai_prompt": {
+        "type": "string",
+        "default": "判断以下群聊消息是否包含违规内容（广告、刷屏、恶意链接等）。仅回复yes或no：",
+        "description": "AI审核提示词（与用户消息拼接后发给AI）",
+        "hint": "AI根据此提示判断消息是否违规，回复yes则禁言。注意：如果当前未配置AI提供商则AI审核不生效"
+    },
+    "mute_duration": {
+        "type": "int",
+        "default": 600,
+        "description": "禁言时长（秒）",
+        "hint": "禁言时长，单位为秒，0 表示解除禁言"
+    },
+    "mute_recall": {
+        "type": "bool",
+        "default": false,
+        "description": "撤回违规消息",
+        "hint": "启用后自动撤回触发禁言的违规消息"
+    },
+    "mute_whitelist": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "禁言白名单（用户QQ号）",
+        "hint": "这些用户不会被自动禁言，示例：[\"123456789\", \"987654321\"]"
+    },
+    "mute_reply": {
+        "type": "string",
+        "default": "",
+        "description": "禁言时回复提示，留空则不回复",
+        "hint": "关键词/AI审核触发禁言后向群内发送此消息，留空不发送。支持 {user_id} 和 {mute_duration}（自动转换为天时分秒）"
+    },
+    "blacklist_mute_duration": {
+        "type": "int",
+        "default": 2592000,
+        "description": "黑名单用户禁言时长（秒）",
+        "hint": "黑名单用户自动禁言的时长，单位为秒。默认 2592000 秒（30天）"
+    },
+    "blacklist_mute_reply": {
+        "type": "string",
+        "default": "",
+        "description": "黑名单用户自动禁言时的回复提示，留空则不回复",
+        "hint": "黑名单用户发消息触发禁言时的回复内容，与普通禁言分开配置。留空不发送，支持 {user_id} 和 {mute_duration} 变量"
+    }
+
+}
