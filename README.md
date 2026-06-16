@@ -161,4 +161,4 @@
 
 ## 安装
 
-将 `plugin_group_manager` 目录放入 AstrBot 的 `data/plugins/` 目录下，重启 AstrBot 或在 WebUI 中重载插件即可。
+将 `plugin_smart_group_manager` 目录放入 AstrBot 的 `data/plugins/` 目录下，重启 AstrBot 或在 WebUI 中重载插件即可。
