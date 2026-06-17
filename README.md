@@ -178,6 +178,10 @@
 - AstrBot >= 4.16
 - OneBot v11 协议端（NapCat 等）
 
-## 安装
+## 安装插件
 
-将 `astrbot_plugin_smart_group_manager` 目录放入 AstrBot 的 `data/plugins/` 目录下，重启 AstrBot 或在 WebUI 中重载插件即可。
+**方式一：**
+下载本仓库所有文件并放入`.astrbot\data\plugins` 目录下，重启 AstrBot 或在`插件`页面中刷新即可。
+
+**方式二：**
+在 AstrBot 的`插件`->`AstrBot插件`->右下角加号`安装插件`->`从链接安装`，输入 `https://github.com/MX2546140156/astrbot_plugin_smart_group_manager.git` 点击`安装`即可完成安装。
