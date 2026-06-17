@@ -1,4 +1,4 @@
-# 智能群管理插件 (plugin_smart_group_manager)
+# 智能群管理插件 (astrbot_plugin_smart_group_manager)
 
 基于 AstrBot、aiocqhttp、napcat API 开发的QQ群互动、管理插件，目标成为更好用的QQ群管理插件。
 
@@ -73,6 +73,8 @@
 | `拉黑 QQ号` `拉黑 @用户` | 将用户加入黑名单并禁言（时长由 `blacklist_mute_duration` 决定） |
 | `解黑 QQ号` `解黑 @用户` | 将用户移出黑名单并解除禁言 |
 | `黑名单列表` | 查看当前黑名单中的所有 QQ 号 |
+| `禁言 @用户 秒数` `禁言 QQ号 秒数` | 禁言指定用户指定时长（秒），不填秒数则使用配置的 `mute_duration` |
+| `解禁 @用户` `解禁 QQ号` | 解除指定用户的禁言 |
 | `踢出 QQ号` `踢出 @用户` | 将用户踢出群聊 |
 
 **说明：**
@@ -96,6 +98,22 @@
 - 可设置 `mute_whitelist` 排除特定用户
 - 开启 `mute_recall` 后可同时撤回违规消息
 - 需机器人具备群管理员权限才能执行禁言和撤回
+
+### LLM 回复内容过滤
+
+| 触发方式 | 行为 |
+|---------|------|
+| AI（LLM）回复群聊/私聊消息时 | 自动按规则过滤替换回复内容中的指定文本 |
+
+**说明：**
+- 通过 `llm_filter_rules` 配置过滤规则，列表不为空即生效
+- 每项格式为 `正则表达式=>替换文本`，按顺序依次匹配替换
+- 支持正则分组引用（如 `\1`）
+- 替换文本留空表示删除匹配到的内容
+- 示例规则：
+  - `敏感词=>***` — 将"敏感词"替换为 `***`
+  - `https?://\S+=>[链接已过滤]` — 过滤 URL
+  - `广告语=>` — 删除"广告语"（替换为空）
 
 ## 配置项
 
@@ -127,6 +145,7 @@
 | `mute_reply` | string | `` | 关键词/AI审核触发禁言时的回复，留空不回复。支持 `{user_id}` 和 `{mute_duration}`（自动转为天时分秒） |
 | `blacklist_mute_duration` | int | `2592000` | 黑名单用户禁言时长（秒），默认 30 天 |
 | `blacklist_mute_reply` | string | `` | 黑名单用户自动禁言时的回复，与 `mute_reply` 分开配置。支持 `{user_id}` 和 `{mute_duration}`（自动转为天时分秒） |
+| `llm_filter_rules` | list | `[]` | LLM 回复过滤规则，列表不为空即生效。每项格式 `正则=>替换`，替换为空则删除匹配内容。示例：`["敏感词=>***", "https?://\\\\S+=>[链接已过滤]"]` |
 
 **配置示例：**
 
@@ -161,4 +180,4 @@
 
 ## 安装
 
-将 `plugin_smart_group_manager` 目录放入 AstrBot 的 `data/plugins/` 目录下，重启 AstrBot 或在 WebUI 中重载插件即可。
+将 `astrbot_plugin_smart_group_manager` 目录放入 AstrBot 的 `data/plugins/` 目录下，重启 AstrBot 或在 WebUI 中重载插件即可。

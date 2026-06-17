@@ -9,11 +9,13 @@ import random
 import re
 
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event.filter import on_llm_response
+from astrbot.api.provider import LLMResponse
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 
 
-@register("smart_group_manager", "developer", "智能QQ群管理插件", "1.1.0")
+@register("astrbot_plugin_smart_group_manager", "developer", "智能QQ群管理插件", "1.2.0")
 class SmartGroupManager(Star):
     """智能QQ群管理插件"""
 
@@ -69,6 +71,9 @@ class SmartGroupManager(Star):
         self.enable_admin_commands: bool = config.get("enable_admin_commands", False)
         self.poke_enabled: bool = config.get("poke_enabled", True)
 
+        # LLM 回复过滤配置
+        self.llm_filter_rules: list = config.get("llm_filter_rules", [])
+
         # 戳一戳回复配置（从配置文件加载戳一戳回复配置内容）
         poke_replies = self._load_poke_replies()
         self.poke_back_replies: list = config.get(
@@ -87,7 +92,7 @@ class SmartGroupManager(Star):
                 "poke_noreply_replies": self.poke_noreply_replies,
             })
 
-        logger.info("群管理插件（v1.1.0）已加载")
+        logger.info("群管理插件（v1.2.0）已加载")
 
     # ============================================================
     #  白名单检查
@@ -174,7 +179,7 @@ class SmartGroupManager(Star):
     # ============================================================
 
     async def _handle_admin_command(self, event: AstrMessageEvent, group_id: str, user_id: str, msg_text: str, raw_message) -> bool:
-        """处理群内管理命令：拉黑/踢出/解黑。返回 True 表示已处理"""
+        """处理群内管理命令：拉黑/踢出/解黑/禁言/解禁。返回 True 表示已处理"""
         if not self.enable_admin_commands:
             return False
         text = msg_text.strip()
@@ -271,6 +276,45 @@ class SmartGroupManager(Star):
             await self._call_api(event, "set_group_kick", group_id=int(group_id), user_id=int(target))
             logger.info(f"[群管理命令] {user_id} 踢出 {target} (群 {group_id})")
             await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已踢出 {display}")
+            return True
+
+        if re.match(r"^(禁言)(?:\s|$)", text, re.IGNORECASE):
+            target = extract_target(text, raw_message)
+            if not target:
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：禁言 @用户 秒数 或 禁言 QQ号 秒数")
+                return True
+            if target == user_id:
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message="不能禁言自己")
+                return True
+            if not await self._is_group_admin(event, group_id, user_id):
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message="只有群管理员/群主才能执行此操作")
+                return True
+            # 提取禁言时长
+            rest = re.sub(r"^(禁言)\s*", "", text, flags=re.IGNORECASE)
+            rest = rest.replace(str(target), "").strip()
+            duration_match = re.search(r"(\d+)", rest)
+            duration = int(duration_match.group(1)) if duration_match else self.mute_duration
+            display = await self._get_member_display(event, group_id, target)
+            await self._call_api(event, "set_group_ban", group_id=int(group_id), user_id=int(target), duration=duration)
+            logger.info(f"[群管理命令] {user_id} 禁言 {target} {duration}秒 (群 {group_id})")
+            if duration > 0:
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 禁言{self._format_duration(duration)}")
+            else:
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已解除 {display} 的禁言")
+            return True
+
+        if re.match(r"^(解禁)(?:\s|$)", text, re.IGNORECASE):
+            target = extract_target(text, raw_message)
+            if not target:
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：解禁 @用户 或 解禁 QQ号")
+                return True
+            if not await self._is_group_admin(event, group_id, user_id):
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message="只有群管理员/群主才能执行此操作")
+                return True
+            display = await self._get_member_display(event, group_id, target)
+            await self._call_api(event, "set_group_ban", group_id=int(group_id), user_id=int(target), duration=0)
+            logger.info(f"[群管理命令] {user_id} 解禁 {target} (群 {group_id})")
+            await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已解除 {display} 的禁言")
             return True
 
         return False
@@ -559,6 +603,27 @@ class SmartGroupManager(Star):
                         parts.append(text)
             return " ".join(parts)
         return str(message) if message else ""
+
+    @on_llm_response()
+    async def _filter_llm_response(self, event: AstrMessageEvent, response: LLMResponse) -> None:
+        """过滤 LLM 回复内容，替换自定义关键词/正则"""
+        if not self.llm_filter_rules or not response.completion_text:
+            return
+
+        text = response.completion_text
+        for rule in self.llm_filter_rules:
+            if "=>" not in rule:
+                continue
+            pattern, replacement = rule.split("=>", 1)
+            pattern = pattern.strip()
+            if not pattern:
+                continue
+            try:
+                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            except re.error as e:
+                logger.warning(f"LLM过滤正则表达式错误 [{pattern}]: {e}")
+
+        response.completion_text = text
 
     @staticmethod
     def _get_raw_field(obj, key, default=None):
