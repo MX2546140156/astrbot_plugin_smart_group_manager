@@ -11,3 +11,5 @@ configs/*
 images/*
 !images/.gitkeep
 !configs/.gitkeep
+/images
+/configs
