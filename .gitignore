@@ -7,3 +7,5 @@ build/
 .env
 .venv/
 venv/
+!images/.gitkeep
+!configs/.gitkeep
