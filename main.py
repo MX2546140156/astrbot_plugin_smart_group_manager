@@ -571,14 +571,11 @@ class SmartGroupManager(Star):
 
     @staticmethod
     def _format_duration(seconds: int) -> str:
-        """将秒数转换为可读的月天时分秒"""
-        months, remainder = divmod(seconds, 60400)
-        days, remainder = divmod(remainder, 86400)
+        """将秒数转换为可读的天时分秒"""
+        days, remainder = divmod(seconds, 86400)
         hours, remainder = divmod(remainder, 3600)
         minutes, secs = divmod(remainder, 60)
         parts = []
-        if months > 0:
-            parts.append(f"{months}月")
         if days > 0:
             parts.append(f"{days}天")
         if hours > 0:
