@@ -50,6 +50,21 @@
         "description": "启用群内管理命令（拉黑、解黑、踢出）",
         "hint": "启用后，群管理员可在群内发送「拉黑 QQ」「解黑 QQ」「踢出 QQ」等命令"
     },
+    "blacklist_admin": {
+        "type": "list",
+        "items": {
+            "type": "string"
+        },
+        "default": [],
+        "description": "非群管理员/群主的命令执行白名单",
+        "hint": "授予这些用户执行群管理命令的权限，仅在 enable_admin_commands 开启时生效。示例：[\"123456789\", \"987654321\"]"
+    },
+    "enable_auto_kick": {
+        "type": "bool",
+        "default": false,
+        "description": "拉黑时自动踢出群聊",
+        "hint": "启用后对被拉黑的群成员自动踢出群聊，否则仅禁言该成员"
+    },
     "poke_enabled": {
         "type": "bool",
         "default": true,
