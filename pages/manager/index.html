@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智能群管理插件</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>智能群管理</h1>
+        <button class="theme-btn" id="theme-btn" title="切换亮暗主题"></button>
+      </div>
+      <div class="sidebar-search">
+        <input type="text" id="sidebar-search" placeholder="搜索群/好友/QQ..." class="input" />
+      </div>
+      <nav class="nav-list" role="tablist">
+        <button class="nav-item active" data-tab="default">默认配置</button>
+
+        <div class="nav-group">
+          <button class="nav-group-header" data-group="groups">
+            <span>群组配置</span>
+            <span class="arrow"></span>
+          </button>
+          <div class="nav-sublist" id="sublist-groups"></div>
+        </div>
+
+        <div class="nav-group">
+          <button class="nav-group-header" data-group="friends">
+            <span>好友配置</span>
+            <span class="arrow"></span>
+          </button>
+          <div class="nav-sublist" id="sublist-friends"></div>
+        </div>
+
+        <div class="nav-group">
+          <button class="nav-group-header" data-group="blacklist">
+            <span>黑名单</span>
+            <span class="arrow"></span>
+          </button>
+          <div class="nav-sublist" id="sublist-blacklist"></div>
+        </div>
+      </nav>
+    </aside>
+
+    <main class="app-main" id="app-main">
+      <section id="tab-default" class="tab-content active">
+        <div class="config-toolbar">
+          <span class="toolbar-title">默认配置</span>
+        </div>
+        <div id="default-config-forms"></div>
+      </section>
+
+      <section id="tab-groups" class="tab-content">
+        <div id="group-config-form" style="display:none">
+          <div class="config-toolbar">
+            <span class="toolbar-title" id="group-config-title">群配置</span>
+            <label class="toggle-wrap" id="group-enable-wrap" style="display:none;cursor:pointer;user-select:none;gap:6px;">
+              <div class="toggle" id="group-enable-toggle"></div>
+              <span style="font-size:12px;color:var(--text-secondary);" id="group-enable-label">已禁用</span>
+            </label>
+          </div>
+          <div id="group-config-fields"></div>
+        </div>
+        <div id="group-config-empty" class="empty-state">请在左侧选择一个群</div>
+      </section>
+
+      <section id="tab-friends" class="tab-content">
+        <div id="friend-config-form" style="display:none">
+          <div class="config-toolbar">
+            <span class="toolbar-title" id="friend-config-title">好友配置</span>
+            <label class="toggle-wrap" id="friend-enable-wrap" style="display:none;cursor:pointer;user-select:none;gap:6px;">
+              <div class="toggle" id="friend-enable-toggle"></div>
+              <span style="font-size:12px;color:var(--text-secondary);" id="friend-enable-label">已禁用</span>
+            </label>
+          </div>
+          <div id="friend-config-fields"></div>
+        </div>
+        <div id="friend-config-empty" class="empty-state">请在左侧选择一个好友</div>
+      </section>
+
+      <section id="tab-blacklist" class="tab-content">
+        <div id="blacklist-content"></div>
+      </section>
+    </main>
+
+    <div class="modal-overlay" id="bl-modal" style="display:none">
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">添加黑名单</span>
+          <button class="modal-close" id="bl-modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <label class="modal-label">类型</label>
+          <div class="radio-group" id="bl-modal-scope">
+            <label class="radio-item active" data-value="global">
+              <input type="radio" name="bl-type" value="global" checked hidden />
+              <span class="radio-text">全局黑名单</span>
+            </label>
+            <label class="radio-item" data-value="group">
+              <input type="radio" name="bl-type" value="group" hidden />
+              <span class="radio-text">群黑名单</span>
+            </label>
+          </div>
+          <label class="modal-label" id="bl-modal-group-label" style="display:none">群号</label>
+          <input type="text" id="bl-modal-group-id" placeholder="输入或选择群号" class="input" style="width:100%;margin-bottom:12px;display:none" list="bl-group-list" />
+          <datalist id="bl-group-list"></datalist>
+          <label class="modal-label">用户 QQ 号</label>
+          <input type="text" id="bl-modal-user-id" placeholder="输入 QQ 号" class="input" style="width:100%;" list="bl-member-list" />
+          <datalist id="bl-member-list"></datalist>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="bl-modal-cancel">取消</button>
+          <button class="btn btn-primary" id="bl-modal-confirm">添加</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 确认弹窗 -->
+    <div class="modal-overlay" id="confirm-modal" style="display:none">
+      <div class="modal" style="width:300px;">
+        <div class="modal-header">
+          <span class="modal-title" id="confirm-title">确认操作</span>
+        </div>
+        <div class="modal-body">
+          <p style="color:var(--text-primary);font-size:14px;" id="confirm-message"></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="confirm-cancel">取消</button>
+          <button class="btn btn-danger" id="confirm-ok">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="fab-bar" id="fab-bar">
+      <button class="btn btn-primary fab-btn" id="fab-save" style="display:none"></button>
+      <button class="btn btn-danger fab-btn" id="fab-clear" style="display:none"></button>
+      <button class="btn btn-primary fab-btn" id="fab-bl-add" style="display:none"></button>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
