@@ -40,7 +40,7 @@
 **说明：**
 - 消息默认自动 @新成员，无需手动添加
 - 支持 `\n` 换行符
-- 支持 `{nickname}` 和 `{user_id}` 模板变量
+- 支持 `{user_id}` 变量
 - 留空则不发送欢迎消息
 
 **默认欢迎语：** `欢迎加入本群，请遵守群规～`
@@ -56,7 +56,7 @@
 | 有成员退出群聊（主动退群/被踢） | 发送自定义退群通知消息 + 可选通知图片（支持多张） |
 
 **说明：**
-- 退群后无法获取昵称，仅支持 `{user_id}` 变量（输出QQ号）
+- 退群后无法获取昵称，仅支持 `{user_id}` 变量
 - 支持 `\n` 换行符
 - 留空则不发送退群通知
 
@@ -70,18 +70,20 @@
 
 | 命令 | 说明 |
 |------|------|
-| `拉黑 QQ号` `拉黑 @用户` | 将用户加入黑名单并禁言（时长由 `blacklist_mute_duration` 决定） |
-| `解黑 QQ号` `解黑 @用户` | 将用户移出黑名单并解除禁言 |
+| `拉黑 QQ号` `拉黑 @用户` | 将用户加入当前群的黑名单并禁言或踢出群聊；禁言时长由 `blacklist_mute_duration` 决定，是否踢出由 `enable_auto_kick` 配置决定 | 
+| `解黑 QQ号` `解黑 @用户` | 将用户移出当前群的黑名单并解除禁言 |
+| `全局拉黑 QQ号` `全局拉黑 @用户` | 将用户加入全局黑名单，作用于 `whitelist_group` 配置的群聊并对其禁言或踢出群聊；禁言时长由 `blacklist_mute_duration` 决定，是否踢出由 `enable_auto_kick` 配置决定 | 
+| `全局解黑 QQ号` `全局解黑 @用户` | 将用户移出全局黑名单，作用于 `whitelist_group` 配置的群聊 | 
 | `黑名单列表` | 查看当前黑名单中的所有 QQ 号 |
-| `禁言 @用户 秒数` `禁言 QQ号 秒数` | 禁言指定用户指定时长（秒），不填秒数则使用配置的 `mute_duration` |
-| `解禁 @用户` `解禁 QQ号` | 解除指定用户的禁言 |
-| `踢出 QQ号` `踢出 @用户` | 将用户踢出群聊 |
+| `禁言 QQ号 秒数` `禁言 @用户 秒数` | 禁言指定用户指定时长（秒），不填秒数则使用配置的 `mute_duration` |
+| `解禁 QQ号` `解禁 @用户` | 解除当前群聊中指定用户的禁言 |
+| `踢出 QQ号` `踢出 @用户` | 将用户踢出当前群聊 |
 
 **说明：**
 - 需在配置中启用 `enable_admin_commands` 开关
-- 仅群管理员/群主可执行以上命令
 - QQ号支持纯数字或 @提及
-- 黑名单修改会自动保存到 `blacklist.json` 文件，重启后仍生效
+- 黑名单修改会自动保存到 `configs/blacklist.json` 文件，重启后仍生效
+- 默认仅群管理员/群主可执行以上命令，可在 `blacklist_admin` 中添加非管理员/群主的用户授予执行权限
 
 ### 自动禁言
 
@@ -117,34 +119,36 @@
 
 ## 配置项
 
-在 AstrBot WebUI → 插件管理 → 群管理插件 → 配置 中修改：
+在 AstrBot → 插件管理 → 智能群管理插件 → 配置 中修改：
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `enable_friend_request` | bool | `false` | 启用后，所有好友申请将自动通过 |
-| `enable_group_request` | bool | `false` | 启用后，自动接受他人邀请机器人进群 |
-| `auto_approve_group_join` | bool | `false` | 启用后，机器人作为群管理时自动通过用户的加群申请 |
-| `whitelist` | list | `[]` | 用户白名单，仅在这些好友/私聊用户启用插件功能。示例：`[123456789, 987654321]` |
-| `whitelist_group` | list | `[]` | 群聊白名单，仅在这些群启用插件功能。示例：`[123456789, 987654321]` |
-| `blacklist` | list | `[]` | 用户黑名单，黑名单用户在任何群发消息时自动禁言，不依赖关键词/AI审核。示例：`["123456789"]` |
-| `enable_admin_commands` | bool | `false` | 启用后群管理员可在群内发送「拉黑」「解黑」「踢出」等命令管理群聊 |
-| `poke_enabled` | bool | `true` | 启用戳一戳互动，关闭后机器人不会对戳一戳事件做任何响应 |
-| `poke_back_replies` | list | 内置默认列表 | 戳一戳互动中「戳回去」时随机回复的内容列表，留空则不回复。示例：`["反弹！", "看我戳回去"]` |
-| `poke_noreply_replies` | list | 内置默认列表 | 戳一戳互动中「不戳回去」时随机回复的内容列表，留空则不回复。示例：`["干嘛戳我", "别戳了"]` |
-| `welcome_text` | string | `欢迎加入本群，请遵守群规～` | 进群欢迎内容，支持 `\n` 换行和 `{nickname}`/`{user_id}` 模板，留空则不发送 |
-| `welcome_image_url` | list | `[]` | 欢迎附带图片列表，支持 URL 或本地路径（相对于插件目录），留空则不附带 |
-| `leave_text` | string | `` | 退群通知内容，支持 `\n` 换行和 `{user_id}` 变量，留空则不发送 |
+| `enable_friend_request` | bool | `false` | 自动同意好友申请，启用后所有好友申请将自动通过 |
+| `enable_group_request` | bool | `false` | 自动同意群聊邀请，启用后自动接受他人邀请机器人进群 |
+| `auto_approve_group_join` | bool | `false` | 自动同意加入群聊的申请，启用后机器人作为群管理时自动通过用户的加群申请 |
+| `whitelist` | list | `[]` | 用户白名单，仅在这些好友/私聊用户启用插件功能，若为空则默认所有用户启用。示例：`[123456, 654321]` |
+| `whitelist_group` | list | `[]` | 群聊白名单，仅在这些群启用插件功能，若为空则默认所有群聊启用。示例：`[123456, 654321]` |
+| `blacklist` | list | `[]` | 用户黑名单，黑名单用户在 `whitelist_group` 配置的群聊中发消息时自动对其禁言，不依赖关键词/AI审核；在其申请加入群聊时自动拒绝。示例：`["123456, 654321"]` |
+| `enable_admin_commands` | bool | `false` | 群管理命令功能，启用后群管理员可在群内发送「拉黑」「解黑」「踢出」等命令管理群聊，非管理员/群主可在 `blacklist_admin` 中添加用户授予执行权限 |
+| `blacklist_admin` | list | `[]` | 非群管理员/群主白名单，授予这些用户拥有可执行群管理命令的功能， 仅在 `enable_admin_commands` 开启时生效。示例：`["123456, 654321"]` |
+| `poke_enabled` | bool | `true` | 群聊戳一戳互动功能，启用后机器人会回应戳一戳事件 |
+| `poke_back_replies` | list | 内置默认列表 | 戳一戳互动中触发「戳回去」时随机回复的内容列表，留空则不回复。示例：`["反弹！", "看我戳回去"]` |
+| `poke_noreply_replies` | list | 内置默认列表 | 戳一戳互动中触发「不戳回去」时随机回复的内容列表，留空则不回复。示例：`["干嘛戳我", "别戳了"]` |
+| `welcome_text` | string | `欢迎加入本群，请遵守群规～` | 进群欢迎内容，默认@提及该成员，支持 `\n` 换行，留空则不发送 |
+| `welcome_image_url` | list | `[]` | 进群欢迎内容附带图片列表，支持 URL 或本地路径（相对于插件目录），留空则不附带 |
+| `leave_text` | string | `` | 退群通知内容，支持 `\n` 换行和 `{user_id}` 变量（由于API限制，不支持@提及与 `nick_name` 变量），留空则不发送 |
 | `leave_image_url` | list | `[]` | 退群通知附带图片列表，支持 URL 或本地路径（相对于插件目录），留空则不附带 |
-| `enable_auto_mute` | bool | `false` | 启用后对触发规则的群成员自动禁言 |
+| `enable_auto_mute` | bool | `false` | 拉黑自动禁言，启用后对触发规则的群成员自动禁言 |
+| `enable_auto_kick` | bool | `false` | 启用后对被拉黑的群成员自动踢出群聊，若启用自动禁言则优先踢出群聊，否则仅禁言该成员 |
 | `mute_keywords` | list | `[]` | 禁言触发正则表达式列表，匹配任一即禁言。示例：`["广告", "\\\\d{11,}"]` |
 | `mute_ai_review` | bool | `false` | 启用AI审核禁言，与关键词「或」关系 |
 | `mute_ai_prompt` | string | `判断以下群聊消息是否包含违规内容...` | AI审核提示词，与用户消息拼接后发给AI |
 | `mute_duration` | int | `600` | 禁言时长（秒），`0` 表示解除禁言 |
-| `mute_recall` | bool | `false` | 启用后自动撤回触发禁言的违规消息 |
+| `mute_recall` | bool | `false` | 违规内容撤回，启用后自动撤回触发禁言的违规消息 |
 | `mute_whitelist` | list | `[]` | 禁言白名单，这些用户不会被禁言。示例：`["123456789"]` |
 | `mute_reply` | string | `` | 关键词/AI审核触发禁言时的回复，留空不回复。支持 `{user_id}` 和 `{mute_duration}`（自动转为天时分秒） |
 | `blacklist_mute_duration` | int | `2592000` | 黑名单用户禁言时长（秒），默认 30 天 |
-| `blacklist_mute_reply` | string | `` | 黑名单用户自动禁言时的回复，与 `mute_reply` 分开配置。支持 `{user_id}` 和 `{mute_duration}`（自动转为天时分秒） |
+| `blacklist_mute_reply` | string | `` | 黑名单用户自动禁言时的回复，与 `mute_reply` 配置相互独立。支持 `{user_id}` 和 `{mute_duration}`（自动转为天时分秒） |
 | `llm_filter_rules` | list | `[]` | LLM 回复过滤规则，列表不为空即生效。每项格式 `正则=>替换`，替换为空则删除匹配内容。示例：`["敏感词=>***", "https?://\\\\S+=>[链接已过滤]"]` |
 
 **配置示例：**
@@ -154,20 +158,22 @@
     "enable_friend_request": true,
     "enable_group_request": true,
     "auto_approve_group_join": false,
-    "whitelist": ["123456789", "987654321"],
-    "whitelist_group": ["111111111", "222222222"],
-    "blacklist": [],
+    "whitelist": ["123456", "654321"],
+    "whitelist_group": ["123456", "654321"],
+    "blacklist": ["123456", "654321"],
+    "blacklist_admin": ["123456", "654321"],
     "enable_admin_commands": true,
     "welcome_text": "欢迎加入本群！\\n请遵守群规～",
     "welcome_image_url": ["images/welcome.jpg", "https://example.com/welcome.png"],
     "leave_text": "悄悄是离别的笙歌～{user_id} 离开了我们",
     "leave_image_url": [],
     "enable_auto_mute": true,
+    "enable_auto_kick": false,
     "mute_keywords": ["广告", "\\d{11,}"],
     "mute_ai_review": false,
     "mute_duration": 600,
     "mute_whitelist": [],
-    "mute_reply": "[CQ:at,qq={user_id}] 你已被禁言 {mute_duration}",
+    "mute_reply": "由于您发表不当言论，已被禁言 {mute_duration}",
     "blacklist_mute_duration": 2592000,
     "blacklist_mute_reply": ""
 }
