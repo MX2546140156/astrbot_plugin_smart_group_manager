@@ -44,7 +44,7 @@ except ModuleNotFoundError:
         return {"message": message}, status_code
 
 
-@register("astrbot_plugin_smart_group_manager", "developer", "智能QQ群管理插件", "1.2.0")
+@register("astrbot_plugin_smart_group_manager", "developer", "智能QQ群管理插件", "1.4.0")
 class SmartGroupManager(Star):
     """智能QQ群管理插件"""
 
@@ -193,8 +193,15 @@ class SmartGroupManager(Star):
     # ============================================================
 
     async def _get_member_display(self, event: AstrMessageEvent, group_id: str, target_id: str) -> str:
-        """获取成员显示名，格式：[CQ:at,qq=xxx]（xxx）"""
-        return f"[CQ:at,qq={target_id}]（{target_id}）"
+        """获取成员显示名，格式：[CQ:at,qq=xxx]（xxx）；若成员不在群中则只返回 QQ 号"""
+        bot = getattr(event, "bot", None)
+        if bot:
+            try:
+                await bot.api.call_action("get_group_member_info", group_id=int(group_id), user_id=int(target_id))
+                return f"[CQ:at,qq={target_id}]（{target_id}）"
+            except Exception:
+                pass
+        return f"{target_id}"
 
     async def _is_group_admin(self, event: AstrMessageEvent, group_id: str, user_id: str) -> bool:
         """检查用户是否为群管理员/群主"""
@@ -228,14 +235,25 @@ class SmartGroupManager(Star):
 
     async def _can_blacklist(self, event: AstrMessageEvent, group_id: str, user_id: str, target_id: str) -> bool:
         """检查是否有权限拉黑目标：群主可拉黑所有人，管理员只能拉黑普通成员"""
+        # 直接查目标角色，避免调用 _is_group_admin 触发 get_group_member_info 错误日志
+        bot = getattr(event, "bot", None)
+        target_role = ""
+        if bot:
+            try:
+                info = await bot.api.call_action("get_group_member_info", group_id=int(group_id), user_id=int(target_id))
+                if isinstance(info, dict):
+                    data = info.get("data", info)
+                    target_role = data.get("role", "")
+            except Exception:
+                pass  # 目标不在群中，视为普通成员权限
         # 目标如果是群主，任何人都不能拉黑
-        if await self._is_group_owner(event, group_id, target_id):
+        if target_role == "owner":
             return False
         # 目标是管理员（非群主），只有群主能拉黑
-        if await self._is_group_admin(event, group_id, target_id):
+        if target_role == "admin":
             return await self._is_group_owner(event, group_id, user_id)
-        # 目标是普通成员，有管理权限即可
-        return True
+        # 目标是普通成员或不在群中，有管理权限即可
+        return await self._can_manage(event, group_id, user_id)
 
     # ============================================================
     #  群管理命令
@@ -245,20 +263,40 @@ class SmartGroupManager(Star):
         """处理群内管理命令：拉黑/全局拉黑/解黑/全局解黑/踢出/禁言/解禁/黑名单列表。返回 True 表示已处理"""
         if not self.enable_admin_commands:
             return False
-        text = msg_text.strip()
-
         # 获取机器人自身 QQ 号
         raw = event.message_obj.raw_message
         self_id = str(self._get_raw_field(raw, "self_id", ""))
 
-        # 从原始消息段中提取所有 @ 的 QQ 号
+        text = msg_text.strip()
+        # 剥离开头残留的纯文本 @昵称 前缀（兼容部分客户端将 at 转为纯文本的情况）
+        # 1) 优先按 at 段中的昵称精确剥离（支持无空格的情况，如 "@机器人拉黑123456"）
+        at_names = []
+        if isinstance(raw_message, list):
+            for seg in raw_message:
+                if isinstance(seg, dict) and seg.get("type") == "at":
+                    name = seg.get("data", {}).get("name", "")
+                    if name:
+                        at_names.append(name)
+        for name in sorted(at_names, key=len, reverse=True):
+            for prefix in ("@" + name, name):
+                if text.startswith(prefix):
+                    text = text[len(prefix):].lstrip()
+                    break
+        # 2) 兜底剥离无对应 at 段的 "@非空白+空白" 前缀（如纯文本 "@xx 拉黑..."）
+        text = re.sub(r'^(?:@\S+\s+)+', '', text) or text
+        # 3) 剥离常见的请求前缀（帮我、请、麻烦等），使 "帮我拉黑123456" 能匹配拉黑命令
+        #    使用正向预查确保前缀后紧跟命令词才剥离，避免误伤昵称恰好为"帮我"的用户
+        _cmd_words = r'(?:全局拉黑|全局解黑|黑名单列表|拉黑|解黑|踢出|禁言|解禁)'
+        text = re.sub(r'^(?:(?:帮我|帮忙|帮助|帮|请|麻烦|给我|来|能不能|可以|我要|我想)\s*)+(?=' + _cmd_words + r')', '', text) or text
+
+        # 从原始消息段中提取所有 @ 的 QQ 号（排除机器人自身，避免把 @机器人 当成命令目标）
         def extract_at_qids(raw_msg):
             qids = []
             if isinstance(raw_msg, list):
                 for seg in raw_msg:
                     if isinstance(seg, dict) and seg.get("type") == "at":
                         qq = seg.get("data", {}).get("qq", "")
-                        if qq:
+                        if qq and str(qq) != self_id:
                             qids.append(str(qq))
             return qids
 
@@ -276,7 +314,7 @@ class SmartGroupManager(Star):
         target = None
 
         # ======== 拉黑 ========
-        if re.match(r"^(拉黑)(?:\s|$)", text, re.IGNORECASE):
+        if re.match(r"^(拉黑)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：拉黑 QQ号")
@@ -297,7 +335,8 @@ class SmartGroupManager(Star):
                     await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"只有群主才能拉黑管理员")
                 return True
             if self._is_blacklisted(group_id, target):
-                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"[CQ:at,qq={target}] 已在当前群黑名单中")
+                display = await self._get_member_display(event, group_id, target)
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"{display} 已在当前群黑名单中")
                 return True
             display = await self._get_member_display(event, group_id, target)
             self.group_blacklist.setdefault(str(group_id), []).append(target)
@@ -313,7 +352,7 @@ class SmartGroupManager(Star):
             return True
 
         # ======== 全局拉黑 ========
-        if re.match(r"^(全局拉黑)(?:\s|$)", text, re.IGNORECASE):
+        if re.match(r"^(全局拉黑)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：全局拉黑 QQ号")
@@ -334,13 +373,15 @@ class SmartGroupManager(Star):
                     await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"只有群主才能拉黑管理员")
                 return True
             if target in self.global_blacklist:
-                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"[CQ:at,qq={target}] 已在全局黑名单中")
+                display = await self._get_member_display(event, group_id, target)
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"{display} 已在全局黑名单中")
                 return True
             display = await self._get_member_display(event, group_id, target)
             self.global_blacklist.append(target)
             self._save_blacklist()
             logger.info(f"[群管理命令] {user_id} 将 {target} 加入全局黑名单 (群 {group_id})")
             # 作用于所有 whitelist_group 中的群
+            total_groups = len(self.whitelist_group)
             acted_groups = []
             for gid in self.whitelist_group:
                 try:
@@ -351,14 +392,15 @@ class SmartGroupManager(Star):
                     acted_groups.append(gid)
                 except Exception:
                     pass
+            action_name = '踢出' if self.enable_auto_kick else '禁言'
             if acted_groups:
-                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 加入全局黑名单并在 {len(acted_groups)} 个群中{'踢出' if self.enable_auto_kick else '禁言'}")
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 加入全局黑名单并在 {len(acted_groups)}/{total_groups} 个群中{action_name}成功")
             else:
-                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 加入全局黑名单")
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 加入全局黑名单（{action_name}失败，目标可能不在管理的群中）")
             return True
 
         # ======== 解黑（从当前群黑名单移除） ========
-        if re.match(r"^(解黑)(?:\s|$)", text, re.IGNORECASE):
+        if re.match(r"^(解黑)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：解黑 QQ号")
@@ -370,7 +412,8 @@ class SmartGroupManager(Star):
             global_has = target in self.global_blacklist
             group_has = target in group_list
             if not global_has and not group_has:
-                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"[CQ:at,qq={target}] 不在当前群黑名单中")
+                display = await self._get_member_display(event, group_id, target)
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"{display} 不在当前群黑名单中")
                 return True
             display = await self._get_member_display(event, group_id, target)
             # 从群黑名单移除
@@ -383,7 +426,7 @@ class SmartGroupManager(Star):
             return True
 
         # ======== 全局解黑 ========
-        if re.match(r"^(全局解黑)(?:\s|$)", text, re.IGNORECASE):
+        if re.match(r"^(全局解黑)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：全局解黑 QQ号")
@@ -392,7 +435,8 @@ class SmartGroupManager(Star):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="只有群管理员/群主才能执行此操作")
                 return True
             if target not in self.global_blacklist:
-                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"[CQ:at,qq={target}] 不在全局黑名单中")
+                display = await self._get_member_display(event, group_id, target)
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"{display} 不在全局黑名单中")
                 return True
             display = await self._get_member_display(event, group_id, target)
             self.global_blacklist = [x for x in self.global_blacklist if x != target]
@@ -425,7 +469,7 @@ class SmartGroupManager(Star):
             return True
 
         # ======== 踢出 ========
-        if re.match(r"^(踢出)(?:\s|$)", text, re.IGNORECASE):
+        if re.match(r"^(踢出)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：踢出 QQ号")
@@ -443,7 +487,7 @@ class SmartGroupManager(Star):
             return True
 
         # ======== 禁言 ========
-        if re.match(r"^(禁言)(?:\s|$)", text, re.IGNORECASE):
+        if re.match(r"^(禁言)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：禁言 @用户 秒数 或 禁言 QQ号 秒数")
@@ -469,7 +513,7 @@ class SmartGroupManager(Star):
             return True
 
         # ======== 解禁 ========
-        if re.match(r"^(解禁)(?:\s|$)", text, re.IGNORECASE):
+        if re.match(r"^(解禁)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="格式：解禁 @用户 或 解禁 QQ号")
