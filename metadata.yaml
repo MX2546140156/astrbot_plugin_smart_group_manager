@@ -1,7 +1,7 @@
 name: astrbot_plugin_smart_group_manager
 display_name: 智能群管理插件
 desc: 本插件依赖于OneBot v11 协议端，通过AI进行群管理，支持成员戳一戳互动，私聊/群聊白名单，禁言管理，群内命令管理黑名单等功能。目前支持AI（仅测试DeepSeek）内容审核禁言管理，可自定义禁言规则，撤回违规内容，自定义入群欢迎消息、退群通知、戳一戳互动回复等。
-version: "1.4.0"
+version: "1.5.0"
 author: 明明不会起名
 astrbot_version: ">=4.16,<5"
 support_platforms:
