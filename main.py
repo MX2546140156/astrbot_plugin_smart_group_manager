@@ -395,7 +395,7 @@ class SmartGroupManager(Star):
         text = re.sub(r'^(?:@\S+\s+)+', '', text) or text
         # 3) 剥离常见的请求前缀（帮我、请、麻烦等），使 "帮我拉黑123456" 能匹配拉黑命令
         #    使用正向预查确保前缀后紧跟命令词才剥离，避免误伤昵称恰好为"帮我"的用户
-        _cmd_words = r'(?:全局拉黑|全局解黑|黑名单列表|申请管理权限|申请权限|拉黑|解黑|踢出|禁言|解禁)'
+        _cmd_words = r'(?:全局拉黑|全局解黑|黑名单列表|申请管理权限|申请权限|群管命令|群管理命令|命令菜单|拉黑|解黑|踢出|禁言|解禁)'
         text = re.sub(r'^(?:(?:帮我|帮忙|帮助|帮|请|麻烦|给我|来|能不能|可以|我要|我想)\s*)+(?=' + _cmd_words + r')', '', text) or text
 
         # 权限不足提示（开启自助申请时附上提示）
@@ -441,6 +441,32 @@ class SmartGroupManager(Star):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="申请成功，你现在可以使用群管理命令了")
             else:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="你已申请过，无需重复申请")
+            return True
+
+        # ======== 群管命令菜单 ========
+        if re.match(r"^(群管命令|群管理命令|命令菜单)(?:\s|$)", text, re.IGNORECASE):
+            menu_lines = [
+                "▎群管理命令菜单",
+                "",
+                "拉黑 QQ号/@用户          — 将用户加入本群黑名单",
+                "全局拉黑 QQ号/@用户      — 将用户加入全局黑名单",
+                "解黑 QQ号/@用户          — 从本群黑名单移除",
+                "全局解黑 QQ号/@用户      — 从全局黑名单移除",
+                "踢出 QQ号/@用户          — 将用户踢出本群",
+                "禁言 QQ号/@用户 [秒数]   — 禁言用户，默认秒数不填则使用配置值",
+                "解禁 QQ号/@用户          — 解除用户禁言",
+                "黑名单列表               — 查看本群及全局黑名单",
+            ]
+            if self.enable_public_commands:
+                menu_lines += [
+                    "",
+                    "申请管理权限             — 普通成员自助申请命令权限",
+                ]
+            menu_lines += [
+                "",
+                "群管命令 / 群管理命令 / 命令菜单       — 显示本菜单",
+            ]
+            await self._call_api(event, "send_group_msg", group_id=int(group_id), message="\n".join(menu_lines))
             return True
 
         # ======== 拉黑 ========
