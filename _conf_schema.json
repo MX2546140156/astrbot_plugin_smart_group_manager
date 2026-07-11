@@ -59,11 +59,23 @@
         "description": "非群管理员/群主的命令执行白名单",
         "hint": "授予这些用户执行群管理命令的权限，仅在 enable_admin_commands 开启时生效。示例：[\"123456789\", \"987654321\"]"
     },
+    "enable_public_commands": {
+        "type": "bool",
+        "default": false,
+        "description": "开放群管理命令申请（普通成员可自助申请权限）",
+        "hint": "启用后，普通成员可发送「申请管理权限」自动获得命令执行权限并加入上方白名单。需要 enable_admin_commands 同时开启"
+    },
     "enable_auto_kick": {
         "type": "bool",
         "default": false,
         "description": "拉黑时自动踢出群聊",
         "hint": "启用后对被拉黑的群成员自动踢出群聊，否则仅禁言该成员"
+    },
+    "enable_chain_blacklist": {
+        "type": "bool",
+        "default": false,
+        "description": "启用连带拉黑（仅全局拉黑时生效）",
+        "hint": "启用后，全局拉黑某成员时，会连带拉黑其邀请链上的所有关联成员（邀请人及被邀请人）。需要 enable_admin_commands 开启且使用「全局拉黑」命令时生效"
     },
     "poke_enabled": {
         "type": "bool",
