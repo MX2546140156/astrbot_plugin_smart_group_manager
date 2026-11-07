@@ -1,5 +1,5 @@
 """
-群管理插件 - 支持成员互动、自动审批、进群欢迎等功能。
+群管理插件：支持成员互动、自动审批、进群欢迎与自动禁言等功能。
 """
 
 import asyncio
@@ -16,14 +16,14 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-# 尝试导入 astrbot.api.web 插件页面框架，fallback 到 Quart 原生 API
+# 优先使用 astrbot.api.web 提供的插件页面接口；不可用时回退到原生 Quart API
 try:
     from astrbot.api.web import json_response, error_response, request
 except ModuleNotFoundError:
     from quart import request as _quart_request
 
     class _CompatRequest:
-        """兼容包装，提供 request.json(default=...) 接口"""
+        """Quart 请求对象的兼容包装，提供与 astrbot.api.web 一致的 request.json(default=...) 接口"""
         async def json(self, default=None):
             try:
                 data = await _quart_request.get_json()
@@ -46,7 +46,7 @@ except ModuleNotFoundError:
 
 @register("astrbot_plugin_smart_group_manager", "developer", "智能QQ群管理插件", "1.4.0")
 class SmartGroupManager(Star):
-    """智能QQ群管理插件"""
+    """智能 QQ 群管理插件：负责成员互动、自动审批、进群欢迎与自动禁言等。"""
 
     # 使用 AstrBot 标准插件数据目录
     _DATA_DIR = Path(get_astrbot_data_path()) / "plugin_data" / "astrbot_plugin_smart_group_manager"
@@ -56,6 +56,7 @@ class SmartGroupManager(Star):
     APPLICANTS_FILE = str(_DATA_DIR / "public_applicants.json")
 
     def __init__(self, context: Context, config: dict):
+        """初始化插件实例并加载配置项"""
         super().__init__(context)
         self.config = config
 
@@ -63,10 +64,10 @@ class SmartGroupManager(Star):
         self.enable_friend_request: bool = config.get("enable_friend_request", False)
         self.enable_group_request: bool = config.get("enable_group_request", False)
         self.auto_approve_group_join: bool = config.get("auto_approve_group_join", False)
-        # 统一转为 str，兼容用户填数字的情况（schema items type 为 string，但示例为数字）
+        # 统一转为 str，兼容用户填写数字的情况（schema 中 items 类型为 string，但示例给的是数字）
         self.whitelist: list = [str(item) for item in config.get("whitelist", [])]
         self.whitelist_group: list = [str(item) for item in config.get("whitelist_group", [])]
-        # 合并配置文件黑名单（作为全局黑名单）+ 持久化黑名单
+        # 配置文件中的黑名单（视为全局黑名单）与持久化黑名单合并并去重
         config_blacklist = [str(item) for item in config.get("blacklist", [])]
         loaded = self._load_blacklist()
         self.global_blacklist: list = list(dict.fromkeys(config_blacklist + loaded.get("global", [])))
@@ -121,13 +122,13 @@ class SmartGroupManager(Star):
         self.poke_noreply_replies: list = config.get("poke_noreply_replies", [])
 
         # ============================================================
-        #  Scoped 配置（好友/群单独覆盖）
+        #  作用域配置（scoped，好友/群单独覆盖）
         # ============================================================
         self.scoped_config_file = str(self._DATA_DIR / "scoped_config.json")
         self.scoped_config = self._load_scoped_config()
         self._apply_default_overrides()
 
-        # 缓存的机器人客户端（供管理页面获取群/好友列表）
+        # 缓存的机器人客户端（由事件自动填充，供管理页面调用 API）
         self._cached_bot = None
 
         # ============================================================
@@ -189,7 +190,7 @@ class SmartGroupManager(Star):
     # ============================================================
 
     def _load_invitations(self) -> dict:
-        """加载邀请关系数据，结构：{group_id: [[inviter, invitee], ...]}"""
+        """加载邀请关系数据，结构为 {group_id: [[inviter, invitee], ...]}"""
         try:
             if os.path.exists(self.INVITATION_FILE):
                 with open(self.INVITATION_FILE, "r", encoding="utf-8") as f:
@@ -211,7 +212,7 @@ class SmartGroupManager(Star):
         data = self._load_invitations()
         group_key = str(group_id)
         pairs = data.get(group_key, [])
-        # 已经存在的不重复记录
+        # 已记录过的邀请关系不重复写入
         pair = [inviter_id, invitee_id]
         if pair not in pairs:
             pairs.append(pair)
@@ -226,7 +227,7 @@ class SmartGroupManager(Star):
         if not pairs:
             return []
 
-        # 构建无向图邻接表
+        # 将邀请关系构建为无向图邻接表（邀请人与被邀请人双向连通）
         graph: dict[str, set] = {}
         for a, b in pairs:
             graph.setdefault(a, set()).add(b)
@@ -235,7 +236,7 @@ class SmartGroupManager(Star):
         if target_id not in graph:
             return []
 
-        # BFS 找连通分量
+        # 广度优先遍历（BFS）收集目标所在的整个连通分量
         visited = set()
         queue = [target_id]
         visited.add(target_id)
@@ -334,6 +335,16 @@ class SmartGroupManager(Star):
             pass
         return False
 
+    async def _is_member_in_group(self, event: AstrMessageEvent, group_id: str, user_id: str) -> bool:
+        """检查目标用户是否在指定群中（用于统计真实的群数量）"""
+        info = await self._call_api(event, "get_group_member_info", group_id=int(group_id), user_id=int(user_id))
+        if not isinstance(info, dict):
+            return False
+        data = info.get("data", info)
+        if isinstance(data, dict) and data.get("user_id") is not None:
+            return True
+        return False
+
     async def _can_manage(self, event: AstrMessageEvent, group_id: str, user_id: str) -> bool:
         """检查用户是否有管理权限（群管理员/群主、blacklist_admin 或自助申请白名单用户）"""
         if str(user_id) in self.blacklist_admin:
@@ -344,7 +355,7 @@ class SmartGroupManager(Star):
 
     async def _can_blacklist(self, event: AstrMessageEvent, group_id: str, user_id: str, target_id: str) -> bool:
         """检查是否有权限拉黑目标：群主可拉黑所有人，管理员只能拉黑普通成员"""
-        # 直接查目标角色，避免调用 _is_group_admin 触发 get_group_member_info 错误日志
+        # 先单独查询目标角色，避免走 _is_group_admin 时产生 get_group_member_info 的错误日志
         bot = getattr(event, "bot", None)
         target_role = ""
         if bot:
@@ -354,7 +365,7 @@ class SmartGroupManager(Star):
                     data = info.get("data", info)
                     target_role = data.get("role", "")
             except Exception:
-                pass  # 目标不在群中，视为普通成员权限
+                pass  # 查询失败（目标不在群中）时按普通成员处理
         # 目标如果是群主，任何人都不能拉黑
         if target_role == "owner":
             return False
@@ -372,13 +383,13 @@ class SmartGroupManager(Star):
         """处理群内管理命令：拉黑/全局拉黑/解黑/全局解黑/踢出/禁言/解禁/黑名单列表。返回 True 表示已处理"""
         if not self.enable_admin_commands:
             return False
-        # 获取机器人自身 QQ 号
+        # 取机器人自身 QQ 号，用于在解析命令目标时排除机器人
         raw = event.message_obj.raw_message
         self_id = str(self._get_raw_field(raw, "self_id", ""))
 
         text = msg_text.strip()
-        # 剥离开头残留的纯文本 @昵称 前缀（兼容部分客户端将 at 转为纯文本的情况）
-        # 1) 优先按 at 段中的昵称精确剥离（支持无空格的情况，如 "@机器人拉黑123456"）
+        # 剥离开头残留的纯文本 @昵称 前缀（部分客户端会把 at 段转成纯文本）
+        # 1) 优先按 at 段中的昵称精确剥离（支持无空格的 "@机器人拉黑123456"）
         at_names = []
         if isinstance(raw_message, list):
             for seg in raw_message:
@@ -391,21 +402,22 @@ class SmartGroupManager(Star):
                 if text.startswith(prefix):
                     text = text[len(prefix):].lstrip()
                     break
-        # 2) 兜底剥离无对应 at 段的 "@非空白+空白" 前缀（如纯文本 "@xx 拉黑..."）
+        # 2) 兜底：剥离没有对应 at 段的 "@名字 空格" 前缀（如纯文本 "@xx 拉黑..."）
         text = re.sub(r'^(?:@\S+\s+)+', '', text) or text
         # 3) 剥离常见的请求前缀（帮我、请、麻烦等），使 "帮我拉黑123456" 能匹配拉黑命令
-        #    使用正向预查确保前缀后紧跟命令词才剥离，避免误伤昵称恰好为"帮我"的用户
-        _cmd_words = r'(?:全局拉黑|全局解黑|黑名单列表|申请管理权限|申请权限|群管命令|群管理命令|命令菜单|拉黑|解黑|踢出|禁言|解禁)'
+        #    用正向预查确保前缀之后紧跟命令词才剥离，避免误伤昵称恰好为"帮我"的用户
+        _cmd_words = r'(?:全局拉黑|全局解黑|黑名单列表|申请管理权限|申请权限|群管命令|群管理命令|命令菜单|群管菜单|拉黑|解黑|踢出|禁言|解禁)'
         text = re.sub(r'^(?:(?:帮我|帮忙|帮助|帮|请|麻烦|给我|来|能不能|可以|我要|我想)\s*)+(?=' + _cmd_words + r')', '', text) or text
 
-        # 权限不足提示（开启自助申请时附上提示）
+        # 权限不足时的统一提示文案（开启自助申请时附带申请引导）
         if self.enable_public_commands:
             _perm_denied_msg = "你没有权限执行此操作，发送「申请管理权限」获取权限"
         else:
             _perm_denied_msg = "只有群管理员/群主才能执行此操作"
 
-        # 从原始消息段中提取所有 @ 的 QQ 号（排除机器人自身，避免把 @机器人 当成命令目标）
+        # 从原始消息段中提取所有被 @ 的 QQ 号，排除机器人自身，避免把 @机器人 误当作命令目标
         def extract_at_qids(raw_msg):
+            """从原始消息段中提取所有被 @ 的 QQ 号，并排除机器人自身"""
             qids = []
             if isinstance(raw_msg, list):
                 for seg in raw_msg:
@@ -415,12 +427,13 @@ class SmartGroupManager(Star):
                             qids.append(str(qq))
             return qids
 
-        # 尝试提取命令中的 QQ 号：先看 @，再看纯文本数字
+        # 命令目标解析：优先取 @ 的用户，其次取纯文本中的 QQ 号
         def extract_target(text, raw_msg):
+            """解析命令目标：优先取被 @ 的用户，其次取纯文本中的数字（QQ 号）"""
             at_qids = extract_at_qids(raw_msg)
             if at_qids:
                 return at_qids[0]
-            # 纯文本中找数字
+            # 纯文本中匹配至少 5 位数字作为 QQ 号
             m = re.search(r"(\d{5,})", text)
             if m:
                 return m.group(1)
@@ -428,7 +441,7 @@ class SmartGroupManager(Star):
 
         target = None
 
-        # ======== 申请管理权限（自助申请白名单） ========
+        # ---- 申请管理权限（自助申请白名单） ----
         if self.enable_public_commands and re.match(r"^(申请管理权限|申请权限)(?:\s|$)", text, re.IGNORECASE):
             if await self._is_group_admin(event, group_id, user_id):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="你已经是群管理员，无需申请")
@@ -443,8 +456,8 @@ class SmartGroupManager(Star):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="你已申请过，无需重复申请")
             return True
 
-        # ======== 群管命令菜单 ========
-        if re.match(r"^(群管命令|群管理命令|命令菜单)(?:\s|$)", text, re.IGNORECASE):
+        # ---- 群管命令菜单 ----
+        if re.match(r"^(群管命令|群管理命令|命令菜单|群管菜单)(?:\s|$)", text, re.IGNORECASE):
             menu_lines = [
                 "▎群管理命令菜单",
                 "",
@@ -464,12 +477,12 @@ class SmartGroupManager(Star):
                 ]
             menu_lines += [
                 "",
-                "群管命令 / 群管理命令 / 命令菜单       — 显示本菜单",
+                "群管命令/群管理命令/命令菜单/群管菜单       — 显示本菜单",
             ]
             await self._call_api(event, "send_group_msg", group_id=int(group_id), message="\n".join(menu_lines))
             return True
 
-        # ======== 拉黑 ========
+        # ---- 拉黑（加入本群黑名单） ----
         if re.match(r"^(拉黑)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
@@ -486,33 +499,33 @@ class SmartGroupManager(Star):
                 return True
             if not await self._can_blacklist(event, group_id, user_id, target):
                 if await self._is_group_owner(event, group_id, target):
-                    await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"不能拉黑群主哦")
+                    await self._call_api(event, "send_group_msg", group_id=int(group_id), message="不能拉黑群主哦")
                 else:
-                    await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"只有群主才能拉黑管理员")
+                    await self._call_api(event, "send_group_msg", group_id=int(group_id), message="只有群主才能拉黑管理员")
                 return True
             if self._is_blacklisted(group_id, target):
                 display = await self._get_member_display(event, group_id, target)
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"{display} 已在当前群黑名单中")
                 return True
-            display = await self._get_member_display(event, group_id, target)
-            # 收集需要连带拉黑的目标
+            # 连带拉黑：沿邀请链收集与目标同链的成员（需开启 enable_chain_blacklist）
             chain_targets = []
             if self.enable_chain_blacklist:
                 chain_targets = self._get_chain_targets(group_id, target)
             all_targets = [target] + chain_targets
-            # 拉黑所有目标
+            # 先逐个踢出/禁言并写入黑名单，全部处理完毕后再统一回复
             for t in all_targets:
                 if self._is_blacklisted(group_id, t):
                     continue
                 self.group_blacklist.setdefault(str(group_id), []).append(t)
-                d = await self._get_member_display(event, group_id, t)
                 if self.enable_auto_kick:
                     await self._call_api(event, "set_group_kick", group_id=int(group_id), user_id=int(t), reject_add_request=True)
                 else:
                     await self._call_api(event, "set_group_ban", group_id=int(group_id), user_id=int(t), duration=self.blacklist_mute_duration)
                 logger.info(f"[群管理命令] {user_id} 将 {t} 加入黑名单 (群 {group_id})")
             self._save_blacklist()
-            # 回复消息
+            # 移除完成后再取显示名：已被踢出的成员仅返回 QQ 号，回复不带 @，避免其查看/举报
+            display = await self._get_member_display(event, group_id, target)
+            # 汇总回复：存在连带目标时补充人数说明
             action_name = '踢出' if self.enable_auto_kick else '禁言'
             if len(all_targets) > 1:
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 及其邀请链上的 {len(all_targets)-1} 人加入黑名单并{action_name}")
@@ -520,7 +533,7 @@ class SmartGroupManager(Star):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 加入黑名单并{action_name}")
             return True
 
-        # ======== 全局拉黑 ========
+        # ---- 全局拉黑 ----
         if re.match(r"^(全局拉黑)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
@@ -537,39 +550,43 @@ class SmartGroupManager(Star):
                 return True
             if not await self._can_blacklist(event, group_id, user_id, target):
                 if await self._is_group_owner(event, group_id, target):
-                    await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"不能拉黑群主哦")
+                    await self._call_api(event, "send_group_msg", group_id=int(group_id), message="不能拉黑群主哦")
                 else:
-                    await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"只有群主才能拉黑管理员")
+                    await self._call_api(event, "send_group_msg", group_id=int(group_id), message="只有群主才能拉黑管理员")
                 return True
             if target in self.global_blacklist:
                 display = await self._get_member_display(event, group_id, target)
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"{display} 已在全局黑名单中")
                 return True
-            display = await self._get_member_display(event, group_id, target)
-            # 收集需要连带拉黑的目标
+            # 连带拉黑：沿邀请链收集与目标同链的成员（需开启 enable_chain_blacklist）
             chain_targets = []
             if self.enable_chain_blacklist:
                 chain_targets = self._get_chain_targets(group_id, target)
             all_targets = [target] + chain_targets
-            # 加入全局黑名单
+            # 先将所有目标写入全局黑名单
             for t in all_targets:
                 if t not in self.global_blacklist:
                     self.global_blacklist.append(t)
                     logger.info(f"[群管理命令] {user_id} 将 {t} 加入全局黑名单 (群 {group_id})")
             self._save_blacklist()
-            # 作用于所有 whitelist_group 中的群
+            # 在 whitelist_group 的所有群上执行；仅统计目标实际在群且操作成功的群数
             total_groups = len(self.whitelist_group)
-            acted_groups = []
+            acted_groups = set()
             for gid in self.whitelist_group:
                 for t in all_targets:
+                    # 先确认目标在该群中，避免对不在群的成员误报成功
+                    if not await self._is_member_in_group(event, gid, t):
+                        continue
                     try:
                         if self.enable_auto_kick:
                             await self._call_api(event, "set_group_kick", group_id=int(gid), user_id=int(t), reject_add_request=True)
                         else:
                             await self._call_api(event, "set_group_ban", group_id=int(gid), user_id=int(t), duration=self.blacklist_mute_duration)
+                        acted_groups.add(str(gid))
                     except Exception:
                         pass
-                acted_groups.append(gid)
+            # 移除完成后再取显示名：已在当前群被踢出的成员仅返回 QQ 号，避免其查看/举报
+            display = await self._get_member_display(event, group_id, target)
             action_name = '踢出' if self.enable_auto_kick else '禁言'
             if len(all_targets) > 1:
                 msg = f"已将 {display} 及其邀请链上的 {len(all_targets)-1} 人加入全局黑名单"
@@ -582,7 +599,7 @@ class SmartGroupManager(Star):
             await self._call_api(event, "send_group_msg", group_id=int(group_id), message=msg)
             return True
 
-        # ======== 解黑（从当前群黑名单移除） ========
+        # ---- 解黑（从当前群黑名单移除） ----
         if re.match(r"^(解黑)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
@@ -599,7 +616,7 @@ class SmartGroupManager(Star):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"{display} 不在当前群黑名单中")
                 return True
             display = await self._get_member_display(event, group_id, target)
-            # 从群黑名单移除
+            # 从本群黑名单中移除目标
             if group_has:
                 self.group_blacklist[str(group_id)] = [x for x in group_list if x != target]
             self._save_blacklist()
@@ -608,7 +625,7 @@ class SmartGroupManager(Star):
             await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 移出当前群黑名单")
             return True
 
-        # ======== 全局解黑 ========
+        # ---- 全局解黑 ----
         if re.match(r"^(全局解黑)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
@@ -625,7 +642,7 @@ class SmartGroupManager(Star):
             self.global_blacklist = [x for x in self.global_blacklist if x != target]
             self._save_blacklist()
             logger.info(f"[群管理命令] {user_id} 将 {target} 移出全局黑名单 (群 {group_id})")
-            # 作用于所有 whitelist_group 中的群
+            # 同步解除 whitelist_group 中所有群的禁言
             for gid in self.whitelist_group:
                 try:
                     await self._call_api(event, "set_group_ban", group_id=int(gid), user_id=int(target), duration=0)
@@ -634,7 +651,7 @@ class SmartGroupManager(Star):
             await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已将 {display} 移出全局黑名单")
             return True
 
-        # ======== 黑名单列表 ========
+        # ---- 黑名单列表 ----
         if re.match(r"^(黑名单列表)(?:\s|$)", text, re.IGNORECASE):
             if not await self._can_manage(event, group_id, user_id):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=_perm_denied_msg)
@@ -642,16 +659,66 @@ class SmartGroupManager(Star):
             if not self.global_blacklist and not self.group_blacklist.get(str(group_id), []):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message="黑名单为空")
                 return True
-            parts = []
             group_list = self.group_blacklist.get(str(group_id), [])
+            total = len(group_list) + len(self.global_blacklist)
+            sections = []
             if group_list:
-                parts.append(f"▎本群黑名单：\n" + "\n".join(group_list))
+                sections.append(("本群黑名单", group_list))
             if self.global_blacklist:
-                parts.append(f"▎全局黑名单：\n" + "\n".join(self.global_blacklist))
-            await self._call_api(event, "send_group_msg", group_id=int(group_id), message="\n\n".join(parts))
+                sections.append(("全局黑名单", self.global_blacklist))
+
+            # 总数不超过 10 个时直接发送文本
+            if total <= 10:
+                parts = [f"▎{title}：\n" + "\n".join(lst) for title, lst in sections]
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message="\n\n".join(parts))
+                return True
+
+            # 超过 10 个改用合并转发；超过 30 个时按节点分片，每片 30 个
+            chunk_size = 30 if total > 30 else 0
+
+            def _make_node(text: str) -> dict:
+                uid = int(self_id) if str(self_id).isdigit() else 0
+                # 同时提供 user_id/nickname 与 uin/name 两套字段，兼容不同实现
+                return {
+                    "type": "node",
+                    "data": {
+                        "user_id": uid,
+                        "nickname": "群管助手",
+                        "name": "群管助手",
+                        "uin": uid,
+                        "content": [{"type": "text", "data": {"text": text}}],
+                    },
+                }
+
+            nodes = []
+            for title, lst in sections:
+                if chunk_size:
+                    for i in range(0, len(lst), chunk_size):
+                        chunk = lst[i:i + chunk_size]
+                        nodes.append(_make_node(f"▎{title}（{i + 1}-{i + len(chunk)}，共{len(lst)}个）\n" + "\n".join(chunk)))
+                else:
+                    nodes.append(_make_node(f"▎{title}（共{len(lst)}个）\n" + "\n".join(lst)))
+
+            # 直接调用 bot API，并以异常判断成败，避免 data 为空时被误判为失败
+            sent = False
+            bot = getattr(event, "bot", None)
+            if bot is not None:
+                for action in ("send_forward_msg", "send_group_forward_msg"):
+                    kwargs = {"group_id": int(group_id), "messages": nodes}
+                    if action == "send_forward_msg":
+                        kwargs["message_type"] = "group"
+                    try:
+                        await bot.api.call_action(action, **kwargs)
+                        sent = True
+                        break
+                    except Exception:
+                        pass
+            if not sent:
+                parts = [f"▎{title}：\n" + "\n".join(lst) for title, lst in sections]
+                await self._call_api(event, "send_group_msg", group_id=int(group_id), message="\n\n".join(parts))
             return True
 
-        # ======== 踢出 ========
+        # ---- 踢出 ----
         if re.match(r"^(踢出)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
@@ -663,13 +730,14 @@ class SmartGroupManager(Star):
             if not await self._can_manage(event, group_id, user_id):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=_perm_denied_msg)
                 return True
-            display = await self._get_member_display(event, group_id, target)
+            # 先踢出，再获取显示名并回复（被踢后仅剩 QQ 号，避免 @ 到已移除成员）
             await self._call_api(event, "set_group_kick", group_id=int(group_id), user_id=int(target))
             logger.info(f"[群管理命令] {user_id} 踢出 {target} (群 {group_id})")
+            display = await self._get_member_display(event, group_id, target)
             await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已踢出 {display}")
             return True
 
-        # ======== 禁言 ========
+        # ---- 禁言 ----
         if re.match(r"^(禁言)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
@@ -681,7 +749,7 @@ class SmartGroupManager(Star):
             if not await self._can_manage(event, group_id, user_id):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=_perm_denied_msg)
                 return True
-            # 提取禁言时长
+            # 解析禁言时长，缺省时使用配置中的默认值
             rest = re.sub(r"^(禁言)\s*", "", text, flags=re.IGNORECASE)
             rest = rest.replace(str(target), "").strip()
             duration_match = re.search(r"(\d+)", rest)
@@ -695,7 +763,7 @@ class SmartGroupManager(Star):
                 await self._call_api(event, "send_group_msg", group_id=int(group_id), message=f"已解除 {display} 的禁言")
             return True
 
-        # ======== 解禁 ========
+        # ---- 解禁 ----
         if re.match(r"^(解禁)(?:\s|$|\d)", text, re.IGNORECASE):
             target = extract_target(text, raw_message)
             if not target:
@@ -713,7 +781,7 @@ class SmartGroupManager(Star):
         return False
 
     # ============================================================
-    #  进群欢迎
+    #  进群欢迎与退群通知
     # ============================================================
 
     async def _send_welcome_message(self, event: AstrMessageEvent, group_id: str, user_id: str, nickname: str):
@@ -723,10 +791,10 @@ class SmartGroupManager(Star):
                 return
             text = self.welcome_text.replace("{nickname}", nickname).replace("{user_id}", str(user_id)).replace("\\n", "\n")
 
-            # 构造 CQ 码消息字符串
+            # 拼接 CQ 码消息：先 @ 新成员，再附欢迎语
             message = f"[CQ:at,qq={user_id}] {text}"
 
-            # 可选图片（支持多张）
+            # 可选配图（支持多张；http(s) 链接直接引用，其余按插件目录下的相对路径处理）
             for url in self.welcome_image_urls:
                 if url.startswith("http://") or url.startswith("https://"):
                     message += f"\n[CQ:image,url={url}]"
@@ -746,7 +814,7 @@ class SmartGroupManager(Star):
             logger.error(f"发送进群欢迎消息失败：{e}")
 
     async def _send_leave_message(self, event: AstrMessageEvent, group_id: str, user_id: str, sub_type: str):
-        """发送退群通知"""
+        """发送退群通知（sub_type 保留用于区分离开方式，暂不参与文案渲染）"""
         try:
             if not self.leave_text:
                 return
@@ -754,7 +822,7 @@ class SmartGroupManager(Star):
 
             message = text
 
-            # 可选图片（支持多张）
+            # 可选配图（支持多张；http(s) 链接直接引用，其余按插件目录下的相对路径处理）
             for url in self.leave_image_urls:
                 if url.startswith("http://") or url.startswith("https://"):
                     message += f"\n[CQ:image,url={url}]"
@@ -788,7 +856,7 @@ class SmartGroupManager(Star):
             return None
 
     async def _handle_poke_reply(self, event: AstrMessageEvent, group_id: str, user_id: str):
-        """被戳后：随机选一条回复 + 50% 概率戳回去"""
+        """被戳后随机选一条回复，抽中回戳池时再戳回对方"""
         try:
             replies = self.poke_back_replies if random.random() < 0.5 else self.poke_noreply_replies
             text = random.choice(replies) if replies else ""
@@ -817,7 +885,7 @@ class SmartGroupManager(Star):
             return gcfg.get(key, default)
 
         try:
-            # 黑名单检查，黑名单用户发消息自动处理
+            # 黑名单检查：命中后直接禁言或踢出，不再进入后续规则
             if self._is_blacklisted(str(group_id), str(user_id)):
                 logger.info(f"[黑名单] 群 {group_id} 黑名单用户 {user_id} 发送消息")
                 # 群主/管理员不受禁言/踢出影响，跳过所有操作
@@ -939,21 +1007,21 @@ class SmartGroupManager(Star):
     def _get_llm(self):
         """获取当前使用的 LLM 提供商"""
         try:
-            # 新版 AstrBot
+            # 优先使用新版 AstrBot 的 get_llm()
             return self.context.get_llm()
         except AttributeError:
             pass
         try:
             pm = self.context.provider_manager
-            # 方式1: get_using_provider("llm")
+            # 方式 1：调用 get_using_provider("llm")
             try:
                 return pm.get_using_provider("llm")
             except Exception:
                 pass
-            # 方式2: 直接取当前实例
+            # 方式 2：直接取当前使用的实例
             if hasattr(pm, 'curr_provider_inst') and pm.curr_provider_inst is not None:
                 return pm.curr_provider_inst
-            # 方式3: 从 provider_insts 中取第一个
+            # 方式 3：从 provider_insts 中取第一个
             if hasattr(pm, 'provider_insts') and pm.provider_insts:
                 insts = pm.provider_insts
                 if isinstance(insts, dict):
@@ -971,7 +1039,7 @@ class SmartGroupManager(Star):
         """从 LLM 响应中提取文本内容（兼容 LLMResponse / openai SDK / 字符串等）"""
         if isinstance(resp, str):
             return resp
-        # AstrBot LLMResponse: resp.result_chain.chain[0].text
+        # AstrBot 的 LLMResponse：resp.result_chain.chain[0].text
         if hasattr(resp, 'result_chain'):
             chain = resp.result_chain
             if hasattr(chain, 'chain') and chain.chain:
@@ -1062,7 +1130,7 @@ class SmartGroupManager(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
-        """监听所有事件：戳一戳、进群通知、好友/群请求等"""
+        """监听全部事件：好友/群请求、戳一戳、进退群通知与群消息等"""
         try:
             raw = event.message_obj.raw_message
 
@@ -1088,7 +1156,7 @@ class SmartGroupManager(Star):
                     group_id = self._get_raw_field(raw, "group_id")
                     user_id = self._get_raw_field(raw, "user_id")
 
-                    # 黑名单用户申请加群 → 拒绝
+                    # 黑名单用户申请加群时直接拒绝
                     if sub_type == "add" and self._is_blacklisted(str(group_id), str(user_id)):
                         logger.info(f"黑名单用户 {user_id} 申请加入群 {group_id}，自动拒绝")
                         await self._call_api(
@@ -1116,13 +1184,13 @@ class SmartGroupManager(Star):
                 return
 
             # ============================================================
-            #  处理通知事件（戳一戳、进群等）
+            #  处理通知事件（戳一戳、进群、退群等）
             # ============================================================
             if post_type == "notice":
                 notice_type = self._get_raw_field(raw, "notice_type")
                 sub_type = self._get_raw_field(raw, "sub_type")
 
-                # 群白名单检查（notice 事件都属于群相关）
+                # 群白名单检查：notice 事件都与群相关，不在白名单则直接跳过
                 group_id = self._get_raw_field(raw, "group_id")
                 if group_id and not self._is_group_allowed(str(group_id)):
                     logger.info(f"群 {group_id} 不在白名单中，跳过处理")
@@ -1153,18 +1221,18 @@ class SmartGroupManager(Star):
                     if not (group_id and user_id):
                         return
 
-                    # bot 自己加群时不发送欢迎
+                    # 机器人自身入群时不发送欢迎语
                     if str(user_id) == str(self_id):
                         logger.info(f"[进群欢迎] bot 自身加入群 {group_id}，跳过欢迎")
                         return
 
-                    # 记录邀请关系（连带拉黑用），仅当 sub_type 为 "invite" 且有 operator_id 时
+                    # 记录邀请关系（供连带拉黑使用）：仅邀请入群且 operator_id 有效时记录
                     if sub_type == "invite":
                         operator_id = self._get_raw_field(raw, "operator_id", "")
                         if operator_id and str(operator_id) != str(user_id):
                             self._record_invitation(str(group_id), str(operator_id), str(user_id))
 
-                    # 先尝试从原始事件获取昵称
+                    # 优先从事件原始字段取昵称，取不到再查群成员信息
                     nickname = self._get_raw_field(raw, "nickname", "")
                     if not nickname:
                         try:
@@ -1207,7 +1275,7 @@ class SmartGroupManager(Star):
                     return
 
             # ============================================================
-            #  处理群消息事件（自动禁言）
+            #  处理群消息事件（群管理命令与自动禁言）
             # ============================================================
             if post_type == "message":
                 message_type = self._get_raw_field(raw, "message_type")
@@ -1239,7 +1307,7 @@ class SmartGroupManager(Star):
                 if not msg_text:
                     return
 
-                # 先检查是否是群管理命令（拉黑/解黑等），处理后阻止事件继续传播给 AI
+                # 先处理群管理命令（拉黑/解黑等），命中后阻止事件继续传给 AI
                 if await self._handle_admin_command(event, str(group_id), str(user_id), msg_text, raw_message):
                     event.stop_event()
                     return
@@ -1251,7 +1319,7 @@ class SmartGroupManager(Star):
             logger.error(f"处理事件失败：{e}")
 
     # ============================================================
-    #  Scoped 配置管理（好友/群单独覆盖）
+    #  作用域配置管理（scoped，好友/群单独覆盖）
     # ============================================================
 
     def _load_scoped_config(self) -> dict:
@@ -1288,7 +1356,7 @@ class SmartGroupManager(Star):
                     setattr(self, key, value)
                 except Exception:
                     pass
-        # 处理属性名映射
+        # 配置键与实例属性名不一致时做映射
         if "welcome_image_url" in overrides:
             self.welcome_image_urls = overrides["welcome_image_url"]
         if "leave_image_url" in overrides:
@@ -1305,7 +1373,7 @@ class SmartGroupManager(Star):
         try:
             if self._cached_bot is not None:
                 return self._cached_bot
-            # 通过平台管理器获取
+            # 缓存未命中时遍历平台管理器，取第一个可用的客户端
             for platform in self.context.platform_manager.platform_insts:
                 client = getattr(platform, 'bot', None)
                 if client is not None and hasattr(client, 'api'):
@@ -1414,7 +1482,7 @@ class SmartGroupManager(Star):
             elif key in self.config:
                 default[key] = self.config[key]
 
-        # 修正属性名映射差异
+        # 补正配置键与实例属性名不一致的差异
         default["welcome_image_url"] = self.welcome_image_urls
         default["leave_image_url"] = self.leave_image_urls
 
@@ -1438,11 +1506,11 @@ class SmartGroupManager(Star):
         if not isinstance(data, dict):
             return error_response("无效的请求数据")
 
-        # 只保存 schema 中定义的键
+        # 只保留 schema 中定义过的配置键
         schema = self._get_config_schema()
         filtered = {k: v for k, v in data.items() if k in schema}
 
-        # 写入 scoped 配置（启动时覆盖）
+        # 写入作用域配置的 default 段，插件启动时据此覆盖实例属性
         self.scoped_config["default"] = filtered
         self._save_scoped_config()
 
@@ -1451,7 +1519,7 @@ class SmartGroupManager(Star):
             self.config[k] = v
         self.config.save_config()
 
-        # 应用到运行时
+        # 立即应用到运行时属性
         self._apply_default_overrides()
         return json_response({"status": "ok", "message": "默认配置已保存"})
 
@@ -1465,7 +1533,7 @@ class SmartGroupManager(Star):
         schema = self._get_config_schema()
         filtered = {k: v for k, v in data.items() if k in schema and v is not None}
         self.scoped_config["groups"][str(group_id)] = filtered
-        # 保存配置时自动跟踪该群
+        # 保存配置时自动将该群加入跟踪列表（侧栏常驻显示）
         tracked = list(dict.fromkeys(self.scoped_config.get("tracked_groups", [])))
         if str(group_id) not in tracked:
             tracked.append(str(group_id))
@@ -1490,7 +1558,7 @@ class SmartGroupManager(Star):
         current = self.scoped_config["groups"].get(str(group_id), {})
         if not current:
             return json_response({"status": "ok", "message": f"群 {group_id} 无配置覆盖"})
-        # 只移除黑名单策略相关键，保留其他配置
+        # 只移除黑名单策略相关的键，其余配置保持不变
         bl_keys = {"blacklist_mute_duration", "blacklist_mute_reply", "enable_admin_commands", "blacklist_admin", "enable_auto_kick"}
         changed = False
         for k in bl_keys:
